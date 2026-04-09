@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "317455411891",
+    "project_id": "echoalert-58e07",
+    "storage_bucket": "echoalert-58e07.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:317455411891:android:0b056bf476c1a47f619ec6",
+        "android_client_info": {
+          "package_name": "com.example.echoalert"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA6I2NJrfC9c_1E0Krw6wE0S0Asa9St_1g"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
