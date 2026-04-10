@@ -1,10 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:echoalert/components/custom_appbar.dart';
 import 'package:echoalert/components/navbar_screen.dart';
+import 'package:echoalert/services/nearest_contacts_service.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:google_maps_flutter_android/google_maps_flutter_android.dart';
-import 'package:google_maps_flutter_platform_interface/google_maps_flutter_platform_interface.dart';
 import 'package:pulsator/pulsator.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -23,37 +23,91 @@ class _HomeScreenState extends State<HomeScreen> {
   final DateTime _appStartTime = DateTime.now();
   GoogleMapController? _mapController;
   Set<Marker> _markers = {};
-  
+
+  double? _myLat;
+  double? _myLng;
+
   @override
   void initState() {
     super.initState();
+    _initLocation();
+    _listenForAlerts();
+  }
 
+  /// Get device location, save it to Firestore for nearest-user lookups.
+  Future<void> _initLocation() async {
+    final position = await _safeGetPosition();
+    if (position != null) {
+      _myLat = position.latitude;
+      _myLng = position.longitude;
+      await NearestContactsService.updateUserLocation(
+        position.latitude,
+        position.longitude,
+      );
+    }
+  }
+
+  Future<Position?> _safeGetPosition() async {
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) return null;
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        return null;
+      }
+      return await Geolocator.getCurrentPosition();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _listenForAlerts() {
     FirebaseFirestore.instance
         .collection('alerts')
         .where('timestamp', isGreaterThan: Timestamp.fromDate(_appStartTime))
         .orderBy('timestamp', descending: true)
         .limit(1)
         .snapshots()
-        .listen(
-      (snapshot) {
-        if (snapshot.docs.isNotEmpty) {
-          final alert = snapshot.docs.first;
-          final double? lat = alert.data().containsKey('latitude') ? alert['latitude'] : null;
-          final double? lng = alert.data().containsKey('longitude') ? alert['longitude'] : null;
+        .listen((snapshot) {
+          if (snapshot.docs.isEmpty) {
+            return;
+          }
 
-          if (lat != null && lng != null) {
-            _updateMapPosition(lat, lng, alert['name']);
+          final alert = snapshot.docs.first;
+          final data = alert.data();
+          final double? alertLat = (data['latitude'] as num?)?.toDouble();
+          final double? alertLng = (data['longitude'] as num?)?.toDouble();
+
+          // Nearest-user filter: only show popup if within 5 km of this device.
+          if (_myLat != null &&
+              _myLng != null &&
+              alertLat != null &&
+              alertLng != null) {
+            final dist = NearestContactsService.haversineDistance(
+              _myLat!,
+              _myLng!,
+              alertLat,
+              alertLng,
+            );
+            if (dist > 5.0) return; // too far — skip popup
+          }
+
+          if (alertLat != null && alertLng != null) {
+            _updateMapPosition(alertLat, alertLng, data['name'] ?? '');
           }
 
           _showPopupAlert(
-            alert['name'],
-            alert['houseNo'],
-            alert['houseName'],
-            alert['type'],
+            data['name'] ?? '',
+            data['houseNo'] ?? '',
+            data['houseName'] ?? '',
+            data['type'] ?? '',
+            alertLat,
+            alertLng,
           );
-        }
-      },
-    );
+        });
   }
 
   void _updateMapPosition(double lat, double lng, String senderName) {
@@ -61,7 +115,7 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _markers = {
         Marker(
-          markerId: MarkerId('alert_location'),
+          markerId: const MarkerId('alert_location'),
           position: pos,
           infoWindow: InfoWindow(title: 'SOS: $senderName'),
         ),
@@ -75,20 +129,37 @@ class _HomeScreenState extends State<HomeScreen> {
     String houseNo,
     String houseName,
     String type,
+    double? lat,
+    double? lng,
   ) {
+    String distanceText = '';
+    if (_myLat != null && _myLng != null && lat != null && lng != null) {
+      final dist = NearestContactsService.haversineDistance(
+        _myLat!,
+        _myLng!,
+        lat,
+        lng,
+      );
+      distanceText = '\n\nDistance from you: ${dist.toStringAsFixed(2)} km';
+    }
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        icon: Icon(Icons.emergency, size: 45, color: Colors.red),
+        icon: const Icon(Icons.emergency, size: 45, color: Colors.red),
         title: const Text('Emergency Alert'),
         content: Text(
-          "From: $name \n House No: $houseNo \n House Name: $houseName \n\n Category: $type",
-          style: TextStyle(fontSize: 18),
+          'From: $name\n'
+          'House No: $houseNo\n'
+          'House Name: $houseName\n\n'
+          'Category: $type'
+          '$distanceText',
+          style: const TextStyle(fontSize: 16),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: Text("Dismiss"),
+            child: const Text('Dismiss'),
           ),
         ],
       ),
@@ -98,7 +169,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: CustomAppbar(),
+      appBar: const CustomAppbar(),
       body: SingleChildScrollView(
         child: Padding(
           padding: const EdgeInsets.all(10),
@@ -121,7 +192,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(height: 5),
                 const Text(
-                  "Help will arrive soon",
+                  'Help will arrive soon',
                   style: TextStyle(fontSize: 12, color: Colors.brown),
                 ),
                 const SizedBox(height: 20),
@@ -137,10 +208,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     innerSize: 65.0,
                   ),
                 ),
-
                 const SizedBox(height: 40),
                 Container(
-                  padding: EdgeInsets.all(10),
+                  padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     border: Border.all(color: Colors.white60),
@@ -149,12 +219,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
+                      const Row(
                         children: [
                           Icon(Icons.add_alert, size: 24),
                           SizedBox(width: 10),
-                          const Text(
-                            "Recent Alert Section",
+                          Text(
+                            'Recent Alert Section',
                             style: TextStyle(
                               fontSize: 24,
                               fontWeight: FontWeight.bold,
@@ -189,7 +259,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ),
-      bottomNavigationBar: NavBarScreen(currentIndex: 0),
+      bottomNavigationBar: const NavBarScreen(currentIndex: 0),
     );
   }
 }
