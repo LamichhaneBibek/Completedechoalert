@@ -158,4 +158,4 @@ lib/
 
 ## Developer
 
-**Bibek Lamichhane**
+**Riti Shrestha**
