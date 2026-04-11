@@ -21,8 +21,7 @@ EchoAlert is a Flutter-based emergency alert app that lets you instantly notify 
 ---
 
 ## Screenshots
-
-> _Add screenshots here_
+![Logo](https://raw.githubusercontent.com/ritishrestha/Completedechoalert/main/assets/logo.png)
 
 ---
 
